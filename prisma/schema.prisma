@@ -1,0 +1,236 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  DISABLED
+}
+
+enum AddressType {
+  SHIPPING
+  BILLING
+}
+
+enum ProductStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum CartStatus {
+  ACTIVE
+  CONVERTED
+  ABANDONED
+}
+
+enum OrderStatus {
+  DRAFT
+  PENDING_PAYMENT
+  PAID
+  PROCESSING
+  FULFILLED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  REQUIRES_ACTION
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+model User {
+  id            String      @id @default(cuid())
+  name          String?
+  email         String      @unique
+  emailVerified DateTime?
+  passwordHash  String?
+  phone         String?
+  role          UserRole    @default(CUSTOMER)
+  status        UserStatus  @default(ACTIVE)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  accounts      Account[]
+  sessions      Session[]
+  addresses     Address[]
+  carts         Cart[]
+  orders        Order[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model Address {
+  id          String      @id @default(cuid())
+  userId      String
+  type        AddressType
+  fullName    String
+  line1       String
+  line2       String?
+  city        String
+  state       String?
+  postalCode  String
+  countryCode String
+  phone       String?
+  isDefault   Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shippingFor Order[]     @relation("ShippingAddress")
+  billingFor  Order[]     @relation("BillingAddress")
+}
+
+model Product {
+  id               String         @id @default(cuid())
+  sanityDocumentId String         @unique
+  slug             String         @unique
+  sku              String         @unique
+  name             String
+  status           ProductStatus  @default(DRAFT)
+  currency         String         @default("GBP")
+  priceMinor       Int
+  compareAtMinor   Int?
+  inventoryQty     Int            @default(0)
+  isBackorderable  Boolean        @default(false)
+  categoryPath     String[]
+  brandSlug        String?
+  imageUrl         String?
+  metadata         Json?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  cartItems        CartItem[]
+  orderItems       OrderItem[]
+}
+
+model Cart {
+  id         String     @id @default(cuid())
+  userId     String?
+  status     CartStatus @default(ACTIVE)
+  currency   String     @default("GBP")
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  user       User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  items      CartItem[]
+  order      Order?
+}
+
+model CartItem {
+  id               String   @id @default(cuid())
+  cartId           String
+  productId        String
+  quantity         Int
+  unitPriceMinor   Int
+  discountMinor    Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  cart             Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product          Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([cartId, productId])
+}
+
+model Order {
+  id                 String         @id @default(cuid())
+  orderNumber        String         @unique
+  userId             String?
+  cartId             String?        @unique
+  status             OrderStatus    @default(PENDING_PAYMENT)
+  paymentStatus      PaymentStatus  @default(PENDING)
+  currency           String         @default("GBP")
+  subtotalMinor      Int
+  discountMinor      Int            @default(0)
+  shippingMinor      Int            @default(0)
+  taxMinor           Int            @default(0)
+  totalMinor         Int
+  stripeCheckoutId   String?        @unique
+  stripePaymentIntentId String?     @unique
+  notes              String?
+  placedAt           DateTime?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  user               User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  cart               Cart?          @relation(fields: [cartId], references: [id], onDelete: SetNull)
+  shippingAddressId  String?
+  billingAddressId   String?
+  shippingAddress    Address?       @relation("ShippingAddress", fields: [shippingAddressId], references: [id], onDelete: SetNull)
+  billingAddress     Address?       @relation("BillingAddress", fields: [billingAddressId], references: [id], onDelete: SetNull)
+  items              OrderItem[]
+  payments           Payment[]
+}
+
+model OrderItem {
+  id                 String   @id @default(cuid())
+  orderId            String
+  productId          String?
+  productName        String
+  productSlug        String
+  sku                String
+  quantity           Int
+  unitPriceMinor     Int
+  discountMinor      Int      @default(0)
+  totalMinor         Int
+  snapshot           Json?
+  createdAt          DateTime @default(now())
+  order              Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product            Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+}
+
+model Payment {
+  id                    String        @id @default(cuid())
+  orderId               String
+  provider              String        @default("stripe")
+  providerPaymentId     String?       @unique
+  providerEventId       String?       @unique
+  status                PaymentStatus @default(PENDING)
+  amountMinor           Int
+  currency              String        @default("GBP")
+  rawPayload            Json?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  order                 Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
